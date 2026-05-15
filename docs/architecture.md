@@ -1,0 +1,243 @@
+# AetherMail Architecture
+
+## System Overview
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                              AetherMail PWA                                      │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                         PRESENTATION LAYER                                 │ │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐ │ │
+│  │  │ InboxPage│  │EmailView │  │Compose   │  │ Sidebar  │  │AccountSwitch│ │ │
+│  │  │          │  │          │  │ Modal    │  │          │  │             │ │ │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └─────────────┘ │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                        │                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                            STATE LAYER                                     │ │
+│  │  ┌──────────────────────────────┐  ┌───────────────────────────────────┐  │ │
+│  │  │         Zustand Stores        │  │         IndexedDB (Offline)     │  │ │
+│  │  │  - useEmailStore (emails)     │  │  - emails, accounts, cache      │  │ │
+│  │  │  - useAuthStore (user/accounts)│  │  - persistence layer           │  │ │
+│  │  └──────────────────────────────┘  └───────────────────────────────────┘  │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                        │                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                             HOOKS LAYER                                    │ │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │ │
+│  │  │  useEmail   │  │   useAI     │  │  useAuth    │  │    useSearch    │  │ │
+│  │  │ (CRUD ops)  │  │ (AI calls)  │  │ (OAuth)     │  │  (query logic)  │  │ │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────┘  │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                        │                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                           AGENT LAYER (Agent OS)                          │ │
+│  │  ┌───────────────────────────────────────────────────────────────────────┐  │ │
+│  │  │                        OrchestratorAgent                             │  │ │
+│  │  │  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐ ┌─────────┐  │  │ │
+│  │  │  │ InboxAgent    │ │Summarizer     │ │ DrafterAgent  │ │ Search  │  │  │ │
+│  │  │  │ (sync emails) │ │ (AI summary)  │ │ (AI drafts)   │ │  Agent  │  │  │ │
+│  │  │  └───────────────┘ └───────────────┘ └───────────────┘ └─────────┘  │  │ │
+│  │  │  ┌───────────────┐                                                   │  │ │
+│  │  │  │Prioritizer    │                                                   │  │ │
+│  │  │  │ (AI priority) │                                                   │  │ │
+│  │  │  └───────────────┘                                                   │  │ │
+│  │  └───────────────────────────────────────────────────────────────────────┘  │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                        │                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐ │
+│  │                          PROVIDER LAYER                                     │ │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────────────┐   │ │
+│  │  │GmailAdapter │  │OutlookAdapter│  │        IMAPAdapter              │   │ │
+│  │  │ (Gmail API) │  │(Graph API)  │  │   (IMAP/SMTP protocols)         │   │ │
+│  │  └─────────────┘  └─────────────┘  └─────────────────────────────────┘   │ │
+│  └─────────────────────────────────────────────────────────────────────────────┘ │
+│                                        │                                          │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│                            EXTERNAL INTEGRATIONS                                 │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌────────────────────────────────┐   │
+│  │   Gmail API     │  │  Microsoft      │  │      IMAP/SMTP Servers         │   │
+│  │  (OAuth2)        │  │  Graph API      │  │  (custom credentials)         │   │
+│  └─────────────────┘  └─────────────────┘  └────────────────────────────────┘   │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                        Anthropic Claude API                               │ │
+│  │    - claude-sonnet-4-20250514                                            │ │
+│  │    - Prompt caching for repeated queries                                 │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────────┘
+
+                              PWA / Service Worker Layer
+    ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │  Service Worker (Workbox)                                                │ │
+│  │  - Static asset caching (fingerprint-based)                              │ │
+│  │  - Runtime caching for API responses                                      │ │
+│  │  - Background sync for queued operations                                   │ │
+│  │  - Offline fallback for email viewing                                     │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Layer Breakdown
+
+### PWA Layer (React + Vite + Service Worker)
+
+- **Vite**: Development server with HMR, production builds
+- **React 18**: UI rendering with concurrent features
+- **Vite PWA Plugin**: Generates service worker, manifest.json
+- **Workbox**: Runtime caching strategies (cache-first for static, network-first for API)
+
+### Agent Layer (5 Agents)
+
+| Agent | Responsibility | Key Operations |
+|-------|---------------|----------------|
+| **OrchestratorAgent** | Task routing, agent lifecycle | Route tasks to specialized agents, coordinate workflows |
+| **InboxAgent** | Email sync from all providers | fetchEmails, syncSingleAccount, registerAdapter |
+| **SummarizerAgent** | AI thread summarization | summarize(emails) → {summary, keyPoints, actionItems} |
+| **DrafterAgent** | AI reply drafting | draftReply(email, tone, length) → {draft, subject} |
+| **PrioritizerAgent** | AI urgency scoring | prioritize(emails) → {priority: 1-5, reason} |
+| **SearchAgent** | Search and filtering | search(query, filters) → {results, suggestions} |
+
+### Provider Layer
+
+| Adapter | Protocol | Auth Method |
+|---------|----------|-------------|
+| **GmailAdapter** | Gmail REST API | OAuth2 (Google) |
+| **OutlookAdapter** | Microsoft Graph API | OAuth2 (Microsoft) |
+| **IMAPAdapter** | IMAP/SMTP | Username/Password or App Password |
+
+### AI Layer (Claude API Integration)
+
+Integration points:
+1. **SummarizerAgent** → `claudeClient.summarizeEmails(emails[])`
+2. **DrafterAgent** → `claudeClient.draftReply(content, context)`
+3. **PrioritizerAgent** → `claudeClient.prioritizeEmails(emails[])`
+
+Model: `claude-sonnet-4-20250514` ( Sonnet 4, May 2025 )
+
+## Data Flow: User Action → UI Update
+
+```
+User Action (e.g., click "Summarize")
+       │
+       ▼
+┌──────────────────┐
+│  React Component │
+│  (EmailView)     │
+└────────┬─────────┘
+         │ useAI.summarizeThread(emails)
+         ▼
+┌─────────────────────────────────────────┐
+│  OrchestratorAgent.execute(task)        │
+│  Task: { type: 'summarize_thread', ... }│
+└────────┬────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│  SummarizerAgent.run({ emails })        │
+│  - Calls Claude API                     │
+│  - Returns { summary, keyPoints }      │
+└────────┬────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│  Update Zustand store                   │
+│  useEmailStore.setEmails(updated)       │
+└────────┬────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│  React re-renders                       │
+│  EmailView displays AI summary          │
+└─────────────────────────────────────────┘
+```
+
+## State Management (Zustand Stores)
+
+### useEmailStore
+
+```typescript
+{
+  emails: Email[],
+  folders: EmailFolder[],
+  selectedEmail: Email | null,
+  selectedAccount: string | null,
+  isLoading: boolean,
+  lastSync: Date | null,
+  
+  // Actions
+  fetchEmails(),
+  syncEmails(),
+  markAsRead(emailId),
+  archiveEmail(emailId),
+  searchEmails(query),
+}
+```
+
+### useAuthStore
+
+```typescript
+{
+  user: User | null,
+  accounts: EmailAccount[],
+  
+  // Actions
+  setUser(user),
+  addAccount(account),
+  getAccountToken(accountId),
+}
+```
+
+## Deployment Topology (Vercel)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Vercel Edge Network                         │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Static Assets (React App)                               │   │
+│  │  - CDN-cached HTML/CSS/JS                                │   │
+│  │  - Service Worker for PWA                               │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Vercel Serverless Functions                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │ /api/emails │  │   /api/ai   │  │     /api/auth          │ │
+│  │ (GET/POST)  │  │ (POST)      │  │ (OAuth redirects)      │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  Environment Variables                                      ││
+│  │  - ANTHROPIC_API_KEY                                        ││
+│  │  - GOOGLE_CLIENT_ID / SECRET                                ││
+│  │  - MICROSOFT_CLIENT_ID / SECRET                            ││
+│  │  - DATABASE_URL (session storage)                          ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Serverless Function Behavior
+
+- **/api/emails**: Proxy to email providers (Gmail/Outlook/IMAP)
+- **/api/ai**: Proxy to Claude API (hide API key, add caching)
+- **/api/auth**: OAuth2 flow handlers, session management
+- **Response times**: Cold start ~200ms, warm ~50ms
+- **Timeout**: 10s (Vercel limit)
+
+## Tech Stack Summary
+
+| Layer | Technology |
+|-------|------------|
+| UI Framework | React 18 + TypeScript |
+| Build Tool | Vite 6 |
+| Styling | Tailwind CSS 3.4 |
+| State | Zustand 5 |
+| Routing | React Router v6 |
+| PWA | Vite PWA + Workbox |
+| AI | Anthropic Claude SDK |
+| Auth | Custom OAuth2 (NextAuth-style) |
+| Email | Gmail API, Microsoft Graph, IMAP |
+| Backend | Express (serverless on Vercel) |
+| Database | Vercel Postgres (sessions) |
